@@ -1,0 +1,51 @@
+import pandas as pd
+
+df = pd.read_csv(DATA_DIR + "/cleaned_flights.csv")
+df["date"] = pd.to_datetime(df["date"])
+
+airport_daily = (
+    df.groupby(["origin_airport", "date"])
+    .agg(
+        flights=("delayed_15", "size"),
+        delay_rate=("delayed_15", "mean"),
+        avg_departure_delay=("departure_delay_minutes", "mean"),
+        total_departure_delay=("departure_delay_minutes", "sum"),
+        avg_weather_delay=("delay_weather_minutes", "mean"),
+        total_weather_delay=("delay_weather_minutes", "sum"),
+        weather_delay_rate=("delay_weather_minutes", lambda x: (x > 0).mean())
+    )
+    .reset_index()
+)
+
+airport_daily = airport_daily.sort_values(["origin_airport", "date"])
+
+airport_daily["weather_3day_avg"] = (
+    airport_daily
+    .groupby("origin_airport")["avg_weather_delay"]
+    .transform(lambda x: x.rolling(window=3, center=True, min_periods=2).mean())
+)
+
+weather_cutoff = airport_daily["weather_3day_avg"].quantile(0.95)
+delay_cutoff = airport_daily["avg_departure_delay"].quantile(0.75)
+
+airport_daily["weather_disruption"] = (
+    (airport_daily["weather_3day_avg"] > weather_cutoff) &
+    (airport_daily["avg_departure_delay"] > delay_cutoff)
+)
+
+weather_disruption_dates = airport_daily[
+    airport_daily["weather_disruption"]
+].copy()
+
+weather_disruption_dates[
+    [
+        "origin_airport",
+        "date",
+        "flights",
+        "delay_rate",
+        "avg_departure_delay",
+        "avg_weather_delay",
+        "weather_3day_avg",
+        "total_weather_delay"
+    ]
+].sort_values(["date", "origin_airport"])
